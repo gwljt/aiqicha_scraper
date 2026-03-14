@@ -1,0 +1,14 @@
+# 数据和环境目录
+nodriver_data/
+__pycache__/
+*.db
+*.log
+*.html
+*.png
+*.json
+
+# 导出文件
+exported_companies.csv
+
+# 系统文件
+.DS_Store

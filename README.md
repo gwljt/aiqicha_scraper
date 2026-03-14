@@ -1,0 +1,96 @@
+# 爱企查批量自动化查询系统 spider 🕷️
+
+基于新一代无头浏览器工具 `nodriver`（绕过 Chrome 检测）构建的针对“爱企查”的高效、稳定的自动化爬虫级全案系统。
+
+## ✨ 核心特性
+
+1. **绝对反爬穿透** 🛡️
+   完全脱离前端 JavaScript 运行环境，采用 `nodriver` 进行深度特征隐藏并渲染网页。最终利用 Python 原生正则表达式通过直接解析渲染后的 HTML 源码提取数据，完美摧毁了爱企查对前端 `document.querySelectorAll` 等 DOM 函数的动态劫持和 Hook 反爬策略。
+2. **极速跳出判定** ⚡
+   内置空页面特征捕捉池，当查询像“完全不存在的虚构公司”时，只要匹配到“未找到”相关提醒，脚本不再无脑执行长轮询，而是几秒内迅速斩断并跳跃至下个目标，节约大量死等时间。
+3. **精准提取曾用名** 🗂️
+   彻底解决了“搜的是旧名出来的却是新集团”的问题，精准按 DOM 面板逐个粉碎，支持完整保留公司新名字、爱企查唯一 ID，以及高亮曾用名字段。
+4. **轻量级工业数据库与原生去重** 💾
+   摒弃了老旧难管理的 TSV，全程接入轻便强大的 SQLite (`companies.db`)。
+   - **`UNIQUE KEY` 安全防刷**：依靠 `aiqicha_id` 建主键，使用 `INSERT OR IGNORE` 永远杜绝相同公司重复入库的情况。
+   - **零损耗搜前查库**：请求发送前，系统会智能反查数据库，如果公司在库里（无论现名还是曾用名）早匹配上了，此次网络请求直接原地取消并显示[跳过]。完全不费一丁点儿性能和 IP 连通。
+5. **无加密直接提取工商详情** 🏢
+   新增企业详情数据抓取分支，利用底层接口响应拦截，直接并精准抓取目标开业状态、社会信用代码、注册资本等 30 多项原味核心工商字段入库，无需忍受恶心的前端 DOM 结构变动和弹窗广告干扰！
+6. **指纹混淆与 Stealth 模式** 👻
+   内置指纹抹除技术，动态修改 `navigator.webdriver` 等核心浏览器特征，配合暴力 DOM 清理模式，移除验证码遮罩并恢复页面滚动，显著降低风控频率。
+
+## 📦 环境要求
+
+* **Python 版本**: 3.9+
+* **必要核心库**:
+  ```bash
+  pip install nodriver browser-cookie3 asyncio
+  ```
+  *(注：`sqlite3`, `re`, `urllib`, `random`, `sys` 等均为 Python 自带系统库。)*
+
+## 🚀 快速开始
+
+### 阶段一：获取企业基础信息与 ID 库
+
+1. **准备公司名单：**
+   将所有你要查的公司名，每行一个，全写进同目录下的 `company_names.txt` 文件里。确保没有多余的空行。
+
+2. **启动基础爬虫检索 ID：**
+   直接用 Python 启动主脚本即可：
+   ```bash
+   python aiqicha_id_scraper.py
+   ```
+   *附：如果在终端里想看到实时未被缓存的滚动输出，可以加上 `-u` 选项：`python -u aiqicha_id_scraper.py`*
+
+3. **收割基础数据：**
+   脚本会自动为你生成当前目录下的 `companies.db` 数据库（包含表 `companies`），录入检索到的爱企查唯一 ID，名称以及曾用名。
+
+### 阶段二：提取全量核心工商详情（依赖阶段一的数据）
+
+当你通过阶段一积攒了一定的 `companies` 数据后，你可以执行详情抓取脚本。它会自动去抓取数据库里缺少详情的记录并存入新表 `company_details` 中。
+
+```bash
+python -u aiqicha_detail_scraper.py
+```
+> **💡 小贴士：**
+> 如果抓取详情途中遇到必须要登录或者验证的安全弹窗，不用慌，脚本会在终端停住。你在浏览器中手动处理完验证或关闭弹窗后，在终端敲击一下回车（输入 `y`），脚本即可继续。
+
+### 🔐 登录状态维护 (推荐)
+
+为了获得更稳定的抓取体验，建议先持久化登录状态：
+1. 执行 `python login.py`。
+2. 在自动打开的浏览器中完成爱企查登录（扫码/短信）。
+3. 登录成功后回到终端按 **Enter** 键退出。
+状态将自动保存，后续所有脚本将自动继承登录 Session，不再频繁要求登录。
+
+## 🗄️ 数据库操作说明
+
+抓到的数据都在 `companies.db` 这个由 SQLite 构建的文件里。
+你可以通过专业 SQL 工具（如 DBeaver、DataGrip、Navicat）直观地查看和导出这些数据。
+
+如果你习惯终端，可以这么快速瞥它两眼：
+
+```bash
+# 查看所有已查到 ID 库里的总企业数
+sqlite3 companies.db "SELECT count(*) FROM companies;"
+
+# 查看已经抓到所有详细工商信息的总企业数
+sqlite3 companies.db "SELECT count(*) FROM company_details;"
+
+# 随便抽 5 个详情数据出来看看长什么样
+sqlite3 companies.db -header -column "SELECT aiqicha_id, entName, legalPerson FROM company_details LIMIT 5;"
+
+# 把详情表导出为 CSV 便于丢进 Excel 处理（有乱码可能需要转 UTF-8）
+sqlite3 -header -csv companies.db "select * from company_details;" > detail_result.csv
+```
+
+## 🛠️ 开发者研究工具包
+
+我们在 `research_tools/` 目录下保留了核心研究脚本，用于应对未来可能的反爬升级：
+- **`save_search_html.py`**：捕获搜索页原始源码，分析正则规则。
+- **`capture_detail_data.py`**：演示 JS Fetch 注入技术，定向抓取无损 JSON。
+- **`stealth_utils.py`**：指纹混淆与环境净化核心逻辑。
+
+---
+
+*“数据无价，爬虫有度，请控制好你的并发线程，以免被终身请喝茶。”* —— 开发者留。
